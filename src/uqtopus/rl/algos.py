@@ -80,7 +80,7 @@ class PPO(sb3.PPO):
     def __init__(
         self,
         policy: Any,
-        runner: ClosedLoopRunner,
+        runner: ClosedLoopRunner | None = None,
         *,
         n_episodes: int = 4,
         n_jobs: int = 1,
@@ -95,9 +95,17 @@ class PPO(sb3.PPO):
         kwargs.setdefault("n_steps", kwargs["batch_size"])
         kwargs.setdefault("device", "cpu")
 
-        super().__init__(policy, _SpacesOnlyEnv(runner.spec), **kwargs)
+        env = kwargs.pop("env", None)
+        if runner is not None:
+            env = _SpacesOnlyEnv(runner.spec)
+        elif kwargs.get("_init_setup_model", True):
+            raise ValueError("PPO requires a ClosedLoopRunner")
+        super().__init__(policy, env, **kwargs)
+        if runner is None:
+            return
 
         self.runner = runner
+        self.policy_spec = runner.spec
         self.n_episodes = n_episodes
         self.n_jobs = n_jobs
         self.export_dir = Path(export_dir)
@@ -105,6 +113,32 @@ class PPO(sb3.PPO):
         self.statistics = RunningStatistics(runner.spec.obs_dim)
         self.artifacts: list[PolicyArtifact] = []
         self.rollouts: list[Rollout] = []
+
+    def _excluded_save_params(self) -> list[str]:
+        return super()._excluded_save_params() + ["runner"]
+
+    @classmethod
+    def load(cls, path, *, runner: ClosedLoopRunner, **kwargs) -> "PPO":
+        """
+        Restore a checkpoint with the runner that will collect its episodes.
+
+        Parameters:
+            path: checkpoint saved by PPO.save.
+            runner (ClosedLoopRunner): implements the saved policy contract.
+            **kwargs: passed to stable-baselines3's load.
+
+        Returns:
+            PPO with its weights, optimizer and observation statistics restored.
+        """
+        model = super().load(
+            path, env=_SpacesOnlyEnv(runner.spec), runner=runner, **kwargs
+        )
+        if model.policy_spec.hash != runner.spec.hash:
+            raise ValueError(
+                f"the checkpoint implements contract {model.policy_spec.hash} "
+                f"but the runner expects {runner.spec.hash}"
+            )
+        return model
 
     def collect_rollouts(self, env, callback, rollout_buffer, n_rollout_steps) -> bool:
         """

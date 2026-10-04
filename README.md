@@ -22,6 +22,7 @@ Built on top of `Jinja2`, `xarray` and `fluidfoam`.
 - Parallel execution built-in support for sampled scenarios
 - Reproducible experiment management and basic statistics with CSV/NumPy-friendly outputs
 - Extensible hooks for surrogate modeling with `uqpylab` (https://uqpylab.uq-cloud.io/) and custom post-processing 
+- Intrusive/Closed-loop reinforcement learning: the policy runs inside the OpenFOAM solver (`uqtopus.rl`)
 
 ## Installation
 
@@ -113,10 +114,10 @@ UQTOPUS/
 │   │       └── [script_file]     # Run script (e.g., Allrun)
 │   ├── experiments/          # UQ study results
 │   │   └── [study_name]/     # Individual study results
-│   │       ├── sample_001/   # OpenFOAM case for sample 1
-│   │       ├── sample_002/   # OpenFOAM case for sample 2
+│   │       ├── sample_0001/   # OpenFOAM case for sample 1
+│   │       ├── sample_0002/   # OpenFOAM case for sample 2
 │   │       └── ...
-│   └── config.yaml           # Configuration file for examples
+│   └── config_*.yml          # Configuration file for examples
 └── README.md                 # This file
 ```
 
@@ -279,7 +280,7 @@ uqtopusPolicy
 ```
 No worries with the details here, it is all handled by the Python module itself.
 
-Each episode writes `postProcessing/uqtopusPolicy/<startTime>/trajectory.dat`, one row per control step: the observation read at the start of the control interval, the action sampled for it, before the ramp and the clip to `low` and `high`, and as its time, the end of that interval. Each function object in `function_objects` is time-averaged over the same interval, every sample weighted by its time step, so `reward_fn` sees, for each action, what happened while it was applied. An entry `name/file` reads one file of a function object that writes several, such as `probes/U`, and a column holding a vector or tensor becomes one variable per component: `0.x`, `0.y` and `0.z` for a vector probe.
+Each episode writes `postProcessing/uqtopusPolicy/<startTime>/trajectory.dat`, one row per control step: the observation read at the start of the control interval, the action sampled for it, before the ramp and the clip to `low` and `high`, and as its time, the end of that interval. Each function object in `function_objects` is time-averaged over the same interval, every sample weighted by its time step, so `reward_fn` sees, for each action, what happened while it was applied. An entry `name/file` reads one file of a function object that writes several, such as `probes/U`. Each variable is named after the entry and the column: `forces/Cd` for the entry `forces`, and `probes/p/0` and `probes/T/0` for the same probe in two fields. A column holding a vector or tensor becomes one variable per component, such as `probes/U/0.x`, `probes/U/0.y` and `probes/U/0.z`.
 
 To evaluate a trained policy, `runner.collect(artifact, deterministic=True)` applies the mean action instead of a draw.
 
@@ -325,7 +326,7 @@ myCustomSource
 }
 ```
 
-_See [`src/uqtopus/policy_src/README.md`](src/uqtopus/policy_src/README.md) for the OpenFOAM controller library details_.
+_See [`src/uqtopus/policy_src/README.md`](https://github.com/GBdeMiranda/UQTOPUS/blob/main/src/uqtopus/policy_src/README.md) for the OpenFOAM controller library details_.
 
 ## Examples
 

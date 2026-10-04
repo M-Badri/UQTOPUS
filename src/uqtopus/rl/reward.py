@@ -77,8 +77,11 @@ def read_function_object(
 
     Returns:
         xr.Dataset indexed by 'time', with one variable per column, and one per
-        component for a column holding a vector or tensor.
+        component for a column holding a vector or tensor. Variables are named
+        'name/column', or 'name/file/column' when file is given, such as
+        'forces/Cd', 'probes/T/0' or 'probes/U/0.x'.
     """
+    prefix = name if file is None else f"{name}/{file}"
     root = Path(case_dir) / "postProcessing" / name
     time_dirs = sorted(root.iterdir(), key=lambda d: float(d.name))
 
@@ -108,7 +111,10 @@ def read_function_object(
     names = _column_names(header, len(sizes))
     columns = [c for name, size in zip(names, sizes) for c in _component_names(name, size)]
     return xr.Dataset(
-        {column: ("time", table[:, i]) for i, column in enumerate(columns) if i > 0},
+        {
+            f"{prefix}/{column}": ("time", table[:, i])
+            for i, column in enumerate(columns) if i > 0
+        },
         coords={"time": table[:, 0]},
     )
 
@@ -116,56 +122,59 @@ def read_function_object(
 def align_to_control(
     series: xr.Dataset | xr.DataArray,
     control_times: np.ndarray,
+    *,
+    start_time: float | None = None,
 ) -> xr.Dataset:
     """
     Time-average a signal sampled at CFD resolution over each control interval.
 
-    Each sample counts for the time step that ends at it, and the first sample
-    for a step as long as the second.
+    Each sample represents the time step that ends at it. The first and last
+    values extend to any interval boundaries outside the sampled range.
 
     Parameters:
         series (xr.Dataset or xr.DataArray): indexed by 'time'.
         control_times (np.ndarray): the end of each control interval, as the
             trajectory labels its rows.
+        start_time (float or None): start of the first control interval. None
+            infers it from the spacing of control_times.
 
     Returns:
         xr.Dataset indexed by 'time' at the control instants, holding the time
-        average over the interval that ends at each one, or the last earlier
-        sample where that interval holds none.
+        average over the interval that ends at each one. Past the last sample,
+        the last value holds.
     """
     if isinstance(series, xr.DataArray):
         series = series.to_dataset(name=series.name or "value")
 
     control_times = np.asarray(control_times, dtype=np.float64)
     source_times = series["time"].values
-    interval = (
-        np.diff(control_times).mean()
-        if len(control_times) > 1
-        else control_times[0] - source_times[0]
-    )
-    starts = np.concatenate(([control_times[0] - interval], control_times[:-1]))
+    if start_time is None:
+        start_time = (
+            control_times[0] - np.diff(control_times).mean()
+            if len(control_times) > 1
+            else source_times[0]
+        )
+    starts = np.concatenate(([start_time], control_times[:-1]))
     lo = np.searchsorted(source_times, starts, side="right")
-    hi = np.searchsorted(source_times, control_times, side="right")
-    steps = np.diff(source_times, prepend=source_times[0])
-    steps[0] = steps[1] if len(steps) > 1 else 1.0
+    hi = np.searchsorted(source_times, control_times, side="left")
 
-    empty = hi <= lo
-    if np.any(empty):
+    if np.any(control_times > source_times[-1]):
         logger.warning(
-            "%d of %d control intervals contain no samples; holding the previous "
-            "sample there",
-            int(empty.sum()),
-            len(control_times),
+            "control intervals contain no samples past the end of the source; "
+            "holding the previous value there"
         )
 
-    reduced = {}
-    for variable, data in series.data_vars.items():
-        values = data.values.astype(np.float64)
-        means = [
-            np.average(values[a:b], weights=steps[a:b]) if b > a else values[max(b - 1, 0)]
-            for a, b in zip(lo, hi)
-        ]
-        reduced[variable] = ("time", np.array(means))
+    arrays = {name: data.values.astype(np.float64) for name, data in series.data_vars.items()}
+    reduced = {name: [] for name in series.data_vars}
+    for start, end, a, b in zip(starts, control_times, lo, hi):
+        edges = np.concatenate(([start], source_times[a:b], [end]))
+        indices = np.minimum(
+            np.searchsorted(source_times, edges[1:]), len(source_times) - 1
+        )
+        weights = np.diff(edges)
+        for name, values in arrays.items():
+            reduced[name].append(np.average(values[indices], weights=weights))
+    reduced = {name: ("time", np.array(values)) for name, values in reduced.items()}
     return xr.Dataset(reduced, coords={"time": control_times})
 
 
@@ -176,7 +185,10 @@ def attach(trajectory: xr.Dataset, *series: xr.Dataset) -> xr.Dataset:
     """
     merged = trajectory
     for item in series:
-        merged = merged.merge(align_to_control(item, trajectory["time"].values))
+        times = trajectory["time"].values
+        interval = trajectory.attrs.get("control_interval")
+        start = times[0] - interval if interval is not None else None
+        merged = merged.merge(align_to_control(item, times, start_time=start))
     return merged
 
 

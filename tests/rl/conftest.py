@@ -43,7 +43,7 @@ def make_spec(
     )
 
 
-def write_trajectory(path, spec, times, observations, actions, seed=0):
+def write_trajectory(path, spec, times, observations, actions, seed=0, completed=None):
     """Write a trajectory file the way the solver does."""
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = ["time", *spec.observation.component_names(), *spec.action.component_names()]
@@ -51,8 +51,10 @@ def write_trajectory(path, spec, times, observations, actions, seed=0):
         "# uqtopus trajectory",
         f"# specHash         {spec.hash}",
         f"# seed             {seed}",
-        f"# columns          {' '.join(columns)}",
     ]
+    if completed is not None:
+        lines.append(f"# completedSteps   {completed}")
+    lines.append(f"# columns          {' '.join(columns)}")
     lines += [
         " ".join(f"{v:.10g}" for v in (t, *obs, *act))
         for t, obs, act in zip(times, observations, actions)
@@ -85,9 +87,10 @@ def run_fake_solver(case_dir, params, *, spec, n_steps, fail_after, write_coeffs
     obs = 5.0 + 2.0 * rng.normal(size=(steps, spec.obs_dim))
     act = rng.uniform(-0.1, 0.1, (steps, spec.act_dim))
     if steps:
+        # the interval of the last row is never recorded as completed
         write_trajectory(
             case_dir / "postProcessing/uqtopusPolicy/0/trajectory.dat",
-            spec, times, obs, act, seed=seed,
+            spec, times, obs, act, seed=seed, completed=steps - 1,
         )
 
     if write_coeffs:

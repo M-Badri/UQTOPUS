@@ -32,13 +32,14 @@ def refusing_launcher(case_dir, params):
 
 
 def solver_with_probes(spec, case_dir, params):
-    """The fake solver, plus a probes functionObject writing one scalar and one vector field."""
+    """The fake solver, plus probes of two scalar fields and one vector field."""
     fake_solver(spec)(case_dir, params)
     root = case_dir / "postProcessing" / "probes" / "0"
     root.mkdir(parents=True)
     times = np.round(np.arange(1, N_STEPS * 40 + 1) * 0.01, 6)
     header = "# Probe 0 (0.5 0 0.005)\n#       Probe     0\n#        Time\n"
     (root / "p").write_text(header + "".join(f"{t:g} {2 * t:g}\n" for t in times))
+    (root / "T").write_text(header + "".join(f"{t:g} {3 * t:g}\n" for t in times))
     (root / "U").write_text(header + "".join(f"{t:g} ({t:g} 0 0)\n" for t in times))
 
 
@@ -55,7 +56,7 @@ def coeff_runner(simulator, spec) -> ClosedLoopRunner:
         simulator,
         spec,
         fake_solver(spec),
-        reward_fn=lambda ds: -np.abs(ds["Cl"].values),
+        reward_fn=lambda ds: -np.abs(ds["forceCoeffs/Cl"].values),
         function_objects=["forceCoeffs"],
     )
 
@@ -109,18 +110,20 @@ def test_deterministic_collection_reaches_the_case(simulator, spec, artifact):
     assert "deterministic   yes;" in rendered[1]
 
 
-def test_one_file_of_a_function_object_is_chosen_by_name(simulator, spec, artifact):
+def test_function_object_files_keep_their_names(simulator, spec, artifact):
     runner = make_runner(
         simulator,
         spec,
         partial(solver_with_probes, spec),
-        reward_fn=lambda ds: ds["0.x"].values,
-        function_objects=["probes/U"],
+        reward_fn=lambda ds: ds["probes/U/0.x"].values,
+        function_objects=["probes/p", "probes/T", "probes/U"],
     )
     episode = runner.collect(artifact, n_episodes=1).episodes[0]
 
-    assert {"0.x", "0.y", "0.z"} <= set(episode.data_vars)
+    assert {"probes/U/0.x", "probes/U/0.y", "probes/U/0.z"} <= set(episode.data_vars)
     assert "0" not in episode.data_vars
+    assert np.allclose(episode["probes/p/0"], 2 * episode["probes/U/0.x"])
+    assert np.allclose(episode["probes/T/0"], 3 * episode["probes/U/0.x"])
     # Ux equals the time, so each interval averages to its midpoint
     assert np.allclose(episode["reward"].values, episode["time"].values - 0.2 + 0.005)
 
@@ -165,7 +168,7 @@ def test_the_step_that_diverged_takes_the_divergence_reward(simulator, spec, art
         simulator,
         spec,
         fake_solver(spec, fail_after=5),
-        reward_fn=lambda ds: -np.abs(ds["Cl"].values),
+        reward_fn=lambda ds: -np.abs(ds["forceCoeffs/Cl"].values),
         function_objects=["forceCoeffs"],
         divergence_reward=-10.0,
     )
@@ -176,8 +179,8 @@ def test_the_step_that_diverged_takes_the_divergence_reward(simulator, spec, art
     assert np.array_equal(episode["action"].values, written["action"].values)
     assert episode["reward"].values[-1] == -10.0
     # no functionObject average exists for an interval the solver never finished
-    assert np.isnan(episode["Cl"].values[-1])
-    assert np.all(np.isfinite(episode["Cl"].values[:-1]))
+    assert np.isnan(episode["forceCoeffs/Cl"].values[-1])
+    assert np.all(np.isfinite(episode["forceCoeffs/Cl"].values[:-1]))
 
 
 @pytest.mark.parametrize("divergence_reward, lengths", [(None, [N_STEPS]), (-10.0, [N_STEPS, 1])])

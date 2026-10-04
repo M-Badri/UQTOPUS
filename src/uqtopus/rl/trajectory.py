@@ -29,7 +29,9 @@ def read_trajectory(source: str | Path, spec: PolicySpec) -> xr.Dataset:
 
     Returns:
         xr.Dataset with 'observation' (time, obs_component) and 'action'
-        (time, act_component), and the recorded spec hash and seed in attrs.
+        (time, act_component). attrs hold the spec hash, the seed, the source
+        file, the control interval and, when the solver recorded it, the number
+        of control steps it completed, as 'completed_steps'.
     """
     path = Path(source)
     if path.is_dir():
@@ -59,6 +61,10 @@ def read_trajectory(source: str | Path, spec: PolicySpec) -> xr.Dataset:
     if not np.all(np.isfinite(table)):
         raise ValueError(f"{path} contains non-finite values")
 
+    completed = {}
+    if "completedSteps" in header:
+        completed["completed_steps"] = int(header["completedSteps"])
+
     return xr.Dataset(
         data_vars={
             "observation": (("time", "obs_component"), table[:, 1 : 1 + spec.obs_dim]),
@@ -69,5 +75,11 @@ def read_trajectory(source: str | Path, spec: PolicySpec) -> xr.Dataset:
             "obs_component": spec.observation.component_names(),
             "act_component": spec.action.component_names(),
         },
-        attrs={"spec_hash": spec.hash, "seed": int(header["seed"]), "source": str(path)},
+        attrs={
+            "spec_hash": spec.hash,
+            "seed": int(header["seed"]),
+            "source": str(path),
+            "control_interval": spec.control_interval,
+            **completed,
+        },
     )

@@ -106,7 +106,8 @@ def run_simulation(params: dict[str, float], exp_config: dict[str, Any], verbose
     env = Environment(
         loader=FileSystemLoader(base_dir),
         trim_blocks=True,
-        lstrip_blocks=True
+        lstrip_blocks=True,
+        undefined=StrictUndefined
     )
 
     # ======================================================================
@@ -128,7 +129,7 @@ def run_simulation(params: dict[str, float], exp_config: dict[str, Any], verbose
     # For each template path render all its params at once
     for template_path, params_dict in paths_n_vars.items():
         template = env.get_template(str(template_path))
-        output = template.render(params_dict, undefined=StrictUndefined)
+        output = template.render(params_dict)
 
         target_path = output_path / template_path
         target_path.parent.mkdir(parents=True, exist_ok=True)  # ensure dirs exist
@@ -441,9 +442,9 @@ class OpenFOAMSimulator:
         """
         Execute multiple simulations in parallel.
 
-        Each run is given a deterministic index (0..len(params_list)-1) so that
-        parallel workers never collide on the same run directory, even though
-        each worker process has its own copy of `_run_count`.
+        Each run is given a deterministic index, continuing from `run_count`, so
+        that parallel workers never collide on the same run directory, even
+        though each worker process has its own copy of `_run_count`.
         """
         if n_jobs < 1:
             n_jobs = mp.cpu_count()
@@ -452,7 +453,7 @@ class OpenFOAMSimulator:
             self._process_single_run, verbose=verbose, cleanup=cleanup, overwrite=overwrite
         )
 
-        indexed_params = list(enumerate(params_list))
+        indexed_params = list(enumerate(params_list, start=self._run_count))
 
         datasets = []
         with mp.get_context('spawn').Pool(n_jobs) as pool:
@@ -469,7 +470,7 @@ class OpenFOAMSimulator:
     def _process_single_run(
         self, indexed_params: tuple[int, dict[str, float]], verbose: bool, cleanup: bool, overwrite: bool
     ) -> xr.Dataset:
-        """Helper for multiprocessing. Uses the batch-local index to avoid
+        """Helper for multiprocessing. Uses the index run_batch assigned to avoid
         directory name collisions between parallel workers."""
         idx, params = indexed_params
         return self.run(params, step=idx, verbose=verbose, cleanup=cleanup, overwrite=overwrite)

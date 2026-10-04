@@ -109,9 +109,9 @@ def test_reads_columns_from_the_header(tmp_path):
 
     ds = read_function_object(tmp_path, "forceCoeffs")
 
-    assert set(ds.data_vars) == {"Cd", "Cl"}
+    assert set(ds.data_vars) == {"forceCoeffs/Cd", "forceCoeffs/Cl"}
     assert ds.sizes["time"] == len(times)
-    assert np.allclose(ds["Cd"].values, 1.4)
+    assert np.allclose(ds["forceCoeffs/Cd"].values, 1.4)
 
 
 def test_restarts_are_merged_with_the_later_run_winning(tmp_path):
@@ -122,9 +122,9 @@ def test_restarts_are_merged_with_the_later_run_winning(tmp_path):
 
     ds = read_function_object(tmp_path, "forceCoeffs")
 
-    assert float(ds["Cd"].sel(time=0.2)) == 1.0   # only in the first run
-    assert float(ds["Cd"].sel(time=0.7)) == 2.0   # overlapping: the restart wins
-    assert float(ds["Cd"].sel(time=1.2)) == 2.0   # only in the restart
+    assert float(ds["forceCoeffs/Cd"].sel(time=0.2)) == 1.0   # only in the first run
+    assert float(ds["forceCoeffs/Cd"].sel(time=0.7)) == 2.0   # overlapping: the restart wins
+    assert float(ds["forceCoeffs/Cd"].sel(time=1.2)) == 2.0   # only in the restart
     assert np.all(np.diff(ds["time"].values) > 0)
 
 
@@ -139,7 +139,7 @@ def test_reader_failures_name_the_fix(tmp_path):
     with pytest.raises(ValueError, match="pass file="):
         read_function_object(tmp_path, "forceCoeffs")
 
-    assert set(read_function_object(tmp_path, "forceCoeffs", file="other.dat").data_vars) == {"x"}
+    assert set(read_function_object(tmp_path, "forceCoeffs", file="other.dat").data_vars) == {"forceCoeffs/other.dat/x"}
 
 
 def test_a_vector_column_becomes_one_variable_per_component(tmp_path):
@@ -153,8 +153,8 @@ def test_a_vector_column_becomes_one_variable_per_component(tmp_path):
 
     ds = read_function_object(tmp_path, "probes")
 
-    assert set(ds.data_vars) == {"0.x", "0.y", "0.z", "1.x", "1.y", "1.z"}
-    assert np.allclose(ds["1.y"].values, [0.1, 0.2])
+    assert set(ds.data_vars) == {"probes/0.x", "probes/0.y", "probes/0.z", "probes/1.x", "probes/1.y", "probes/1.z"}
+    assert np.allclose(ds["probes/1.y"].values, [0.1, 0.2])
 
 
 def test_a_nested_group_is_numbered_in_the_order_written(tmp_path):
@@ -169,8 +169,8 @@ def test_a_nested_group_is_numbered_in_the_order_written(tmp_path):
 
     ds = read_function_object(tmp_path, "forces")
 
-    assert list(ds.data_vars)[:6] == [f"forces(pressure viscous).{i}" for i in range(6)]
-    assert float(ds["moments(pressure viscous).5"][0]) == 12.0
+    assert list(ds.data_vars)[:6] == [f"forces/forces(pressure viscous).{i}" for i in range(6)]
+    assert float(ds["forces/moments(pressure viscous).5"][0]) == 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -214,9 +214,9 @@ def test_attach_merges_onto_the_trajectory(spec, tmp_path):
 
     merged = attach(trajectory, read_function_object(tmp_path, "forceCoeffs"))
 
-    assert set(merged.data_vars) >= {"observation", "action", "Cd", "Cl"}
+    assert set(merged.data_vars) >= {"observation", "action", "forceCoeffs/Cd", "forceCoeffs/Cl"}
     assert merged.sizes["time"] == 5
-    assert np.allclose(merged["Cd"].values, 1.4)
+    assert np.allclose(merged["forceCoeffs/Cd"].values, 1.4)
 
 
 # ---------------------------------------------------------------------------

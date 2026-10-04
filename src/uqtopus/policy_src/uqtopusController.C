@@ -255,6 +255,7 @@ void Foam::uqtopusController::writeRow
         os  << "# uqtopus trajectory" << nl
             << "# specHash         " << specHash_ << nl
             << "# seed             " << seed_ << nl
+            << "# completedSteps   0" << nl
             << "# columns          time";
         forAll(sources_, s)
         {
@@ -344,9 +345,18 @@ Foam::uqtopusController::uqtopusController
     seed_(0),
     deterministic_(false),
     curTimeIndex_(-1),
-    nActions_(0)
+    nActions_(0),
+    nCompleted_(0)
 {
     readContract(dict);
+    if (startTime_ < mesh.time().startTime().value() - SMALL)
+    {
+        FatalErrorInFunction
+            << "startTime " << startTime_ << " precedes the run start "
+            << mesh.time().startTime().value()
+            << "; set startTime at or after the run start"
+            << abort(FatalError);
+    }
     locateProbes();
 
     policy_.reset(new onnxPolicy(policyPath_, seed_));
@@ -478,6 +488,23 @@ void Foam::uqtopusController::update() const
     const scalar t = runTime.value();
     const scalar dt = runTime.deltaTValue();
 
+    if (Pstream::master() && trajectory_)
+    {
+        const label previous = nCompleted_;
+        while
+        (
+            nCompleted_ < nActions_
+         && t - 0.5*dt >= startTime_ + (nCompleted_ + 1)*controlInterval_
+        )
+        {
+            nCompleted_++;
+        }
+        if (nCompleted_ != previous)
+        {
+            *trajectory_ << "# completedSteps " << nCompleted_ << endl;
+        }
+    }
+
     if (t < startTime_ - 0.5*dt)
     {
         return;
@@ -491,6 +518,22 @@ void Foam::uqtopusController::update() const
     const bool stopped =
         t > runTime.endTime().value() - 0.5*dt
      || (hasEndTime_ && t > endTime_ - 0.5*dt);
+
+    if
+    (
+        !stopped
+     && (
+            dt > controlInterval_ + SMALL
+         || t > startTime_ + (nActions_ + 1)*controlInterval_ + 0.5*dt
+        )
+    )
+    {
+        FatalErrorInFunction
+            << "the solver has skipped a control interval at t = " << t
+            << "; use a time step at most " << controlInterval_
+            << " and evaluate the controller every time step"
+            << abort(FatalError);
+    }
 
     if (!stopped && t >= startTime_ + nActions_*controlInterval_ - 0.5*dt)
     {

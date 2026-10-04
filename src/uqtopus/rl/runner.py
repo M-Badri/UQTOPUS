@@ -107,8 +107,9 @@ class ClosedLoopRunner:
             against what the solver wrote.
         reward_fn (callable): maps the trajectory, with any requested
             functionObject output merged in, to one reward per control step.
-            attrs['diverged'] tells whether the solver diverged; if it did, the
-            trajectory stops before the step whose interval it never finished.
+            attrs['diverged'] tells whether the solver diverged before finishing
+            every control step; if it did, the trajectory stops before the step
+            whose interval it never finished.
         controller_keys (str or sequence of str): where the controller block is
             rendered, in 'folder__file__variable' form, e.g.
             'system__controlDict__controller'.
@@ -246,15 +247,17 @@ class ClosedLoopRunner:
                 return None, EpisodeFailure(
                     index, case_dir, f"{reason}; no usable trajectory: {read_error}"
                 )
-            return episode, EpisodeFailure(index, case_dir, f"{reason}; partial kept")
+            kept = "partial kept" if episode.attrs["diverged"] else "every control step completed"
+            return episode, EpisodeFailure(index, case_dir, f"{reason}; {kept}")
 
         return self._read_episode(case_dir, diverged=False), None
 
     def _read_episode(self, case_dir: Path, diverged: bool) -> xr.Dataset:
         trajectory = read_trajectory(case_dir, self.spec)
-        trajectory.attrs["diverged"] = diverged
-        # the solver diverged inside the interval of the last row it wrote
-        complete = trajectory.isel(time=slice(None, -1)) if diverged else trajectory
+        count = trajectory.sizes["time"]
+        completed = trajectory.attrs["completed_steps"] if diverged else count
+        trajectory.attrs["diverged"] = completed < count
+        complete = trajectory.isel(time=slice(None, completed))
 
         steps = []
         if complete.sizes["time"]:
@@ -264,8 +267,8 @@ class ClosedLoopRunner:
             ]
             data = attach(complete, *series)
             steps.append(data.assign(reward=("time", evaluate_reward(data, self.reward_fn))))
-        if diverged and self.divergence_reward is not None:
-            failed = trajectory.isel(time=[-1])
+        if completed < count and self.divergence_reward is not None:
+            failed = trajectory.isel(time=[completed])
             steps.append(failed.assign(reward=("time", [float(self.divergence_reward)])))
         if not steps:
             raise ValueError("the solver diverged before completing a control step")

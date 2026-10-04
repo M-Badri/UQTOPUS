@@ -21,7 +21,7 @@ dependencies = [
     "pyDOE3>=1.2.0,<2.0.0",
     "PyYAML>=6.0.2,<7.0.0",
     "tqdm>=4.66.5,<5.0.0",
-    "xarray>=2024.6.0,<2026.0.0"
+    "xarray>=2024.6.0,<2027.0.0"
 ]
 
 [project.scripts]

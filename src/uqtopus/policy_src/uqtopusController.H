@@ -81,6 +81,8 @@ class uqtopusController
     mutable label curTimeIndex_;
     mutable label nActions_;
 
+    mutable label nCompleted_;
+
     mutable std::unique_ptr<onnxPolicy> policy_;
     mutable std::unique_ptr<OFstream> trajectory_;
 
